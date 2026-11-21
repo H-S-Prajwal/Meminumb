@@ -119,6 +119,37 @@ mem.clear(user_id="")                     # → int (count deleted)
 
 ---
 
+## Chat demo — a bot that remembers you
+
+The most direct way to see Meminumb in action is the conversational demo. It uses a Groq-hosted LLM (free, no credit card) and stores everything Meminumb hears about you persistently.
+
+```bash
+pip install groq
+export GROQ_API_KEY="your-key-here"   # free at console.groq.com
+python examples/chat_demo.py
+```
+
+**First session:**
+```
+You: Hi, I'm Prajwal. I love jazz and I'm a backend developer.
+[Meminumb] Stored 3 new fact(s)
+Bot: Nice to meet you Prajwal! Jazz is a great taste. What do you work on?
+
+You: quit
+```
+
+**Second session (new process, same memories):**
+```
+[Meminumb] I remember 3 fact(s) about you from last time.
+
+You: What do you remember about me?
+Bot: You're Prajwal, a backend developer who loves jazz!
+```
+
+Type `memory` to inspect stored facts, `clear` to wipe them.
+
+---
+
 ## Persistent storage
 
 ```python

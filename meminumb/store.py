@@ -11,13 +11,17 @@ from meminumb.result import MemoryItem
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS memories (
-    id        TEXT PRIMARY KEY,
-    content   TEXT NOT NULL,
-    metadata  TEXT NOT NULL DEFAULT '{}',
-    embedding TEXT NOT NULL DEFAULT '[]',
-    created_at REAL NOT NULL
+    id         TEXT PRIMARY KEY,
+    content    TEXT NOT NULL,
+    metadata   TEXT NOT NULL DEFAULT '{}',
+    embedding  TEXT NOT NULL DEFAULT '[]',
+    created_at REAL NOT NULL,
+    expires_at REAL
 );
 """
+
+# Active-row filter: row has no TTL, or its TTL has not passed yet.
+_ACTIVE = "(expires_at IS NULL OR expires_at > ?)"
 
 
 class SQLiteStore:
@@ -35,29 +39,52 @@ class SQLiteStore:
         self._conn = sqlite3.connect(path, check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute(_SCHEMA)
+        self._migrate()
         self._conn.commit()
+
+    def _migrate(self) -> None:
+        """Add expires_at column to existing databases that pre-date TTL support."""
+        try:
+            self._conn.execute("ALTER TABLE memories ADD COLUMN expires_at REAL")
+        except sqlite3.OperationalError:
+            pass  # column already exists
 
     # ------------------------------------------------------------------
     # Write
     # ------------------------------------------------------------------
 
-    def add_atomic(self, item: MemoryItem, embedding: list[float]) -> None:
+    def add_atomic(
+        self,
+        item: MemoryItem,
+        embedding: list[float],
+        expires_at: Optional[float] = None,
+    ) -> None:
         """
         Write a memory and its embedding in one atomic transaction.
 
+        If an expired row with the same ID exists it is replaced.
         If anything fails (constraint error, disk full, …) the connection's
         context manager rolls back automatically — no orphan is left behind.
         """
+        now = time.time()
         with self._conn:
+            # Remove any same-ID row that has already expired so the INSERT below
+            # can succeed. If the same-ID row is still active, this DELETE is a
+            # no-op and the INSERT will raise a constraint error (correct).
             self._conn.execute(
-                "INSERT INTO memories (id, content, metadata, embedding, created_at) "
-                "VALUES (?, ?, ?, ?, ?)",
+                "DELETE FROM memories WHERE id = ? AND expires_at IS NOT NULL AND expires_at <= ?",
+                (item.id, now),
+            )
+            self._conn.execute(
+                "INSERT INTO memories (id, content, metadata, embedding, created_at, expires_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
                 (
                     item.id,
                     item.content,
                     json.dumps(item.metadata),
                     json.dumps(embedding),
-                    time.time(),
+                    now,
+                    expires_at,
                 ),
             )
 
@@ -111,24 +138,36 @@ class SQLiteStore:
                 cur = self._conn.execute("DELETE FROM memories")
         return cur.rowcount
 
+    def clear_expired(self) -> int:
+        """Delete all rows whose TTL has passed. Returns the number of rows removed."""
+        with self._conn:
+            cur = self._conn.execute(
+                "DELETE FROM memories WHERE expires_at IS NOT NULL AND expires_at <= ?",
+                (time.time(),),
+            )
+        return cur.rowcount
+
     # ------------------------------------------------------------------
     # Read
     # ------------------------------------------------------------------
 
     def exists(self, memory_id: str) -> bool:
         cur = self._conn.execute(
-            "SELECT 1 FROM memories WHERE id = ?", (memory_id,)
+            f"SELECT 1 FROM memories WHERE id = ? AND {_ACTIVE}",
+            (memory_id, time.time()),
         )
         return cur.fetchone() is not None
 
     def get(self, memory_id: str) -> Optional[MemoryItem]:
         cur = self._conn.execute(
-            "SELECT id, content, metadata FROM memories WHERE id = ?", (memory_id,)
+            f"SELECT id, content, metadata, expires_at FROM memories "
+            f"WHERE id = ? AND {_ACTIVE}",
+            (memory_id, time.time()),
         )
         row = cur.fetchone()
         if row is None:
             return None
-        return MemoryItem(id=row[0], content=row[1], metadata=json.loads(row[2]))
+        return MemoryItem(id=row[0], content=row[1], metadata=json.loads(row[2]), expires_at=row[3])
 
     def search(
         self,
@@ -137,43 +176,71 @@ class SQLiteStore:
         user_id: Optional[str] = None,
     ) -> list[MemoryItem]:
         """Return top_k memories ranked by cosine similarity to query_embedding."""
+        now = time.time()
         if user_id:
             cur = self._conn.execute(
-                "SELECT id, content, metadata, embedding FROM memories "
-                "WHERE json_extract(metadata, '$.user_id') = ?",
-                (user_id,),
+                f"SELECT id, content, metadata, embedding, expires_at FROM memories "
+                f"WHERE json_extract(metadata, '$.user_id') = ? AND {_ACTIVE}",
+                (user_id, now),
             )
         else:
             cur = self._conn.execute(
-                "SELECT id, content, metadata, embedding FROM memories"
+                f"SELECT id, content, metadata, embedding, expires_at FROM memories "
+                f"WHERE {_ACTIVE}",
+                (now,),
             )
         rows = cur.fetchall()
         if not rows:
             return []
 
         scored = []
-        for row_id, content, metadata_json, embedding_json in rows:
+        for row_id, content, metadata_json, embedding_json, expires_at in rows:
             emb = json.loads(embedding_json)
             score = _cosine(query_embedding, emb)
-            scored.append((score, row_id, content, metadata_json))
+            scored.append((score, row_id, content, metadata_json, expires_at))
 
         scored.sort(key=lambda x: x[0], reverse=True)
         return [
-            MemoryItem(id=r[1], content=r[2], metadata=json.loads(r[3]))
+            MemoryItem(id=r[1], content=r[2], metadata=json.loads(r[3]), expires_at=r[4])
             for r in scored[:top_k]
         ]
 
     def all(self, user_id: Optional[str] = None) -> list[MemoryItem]:
+        now = time.time()
         if user_id:
             cur = self._conn.execute(
-                "SELECT id, content, metadata FROM memories "
-                "WHERE json_extract(metadata, '$.user_id') = ?",
-                (user_id,),
+                f"SELECT id, content, metadata, expires_at FROM memories "
+                f"WHERE json_extract(metadata, '$.user_id') = ? AND {_ACTIVE}",
+                (user_id, now),
             )
         else:
-            cur = self._conn.execute("SELECT id, content, metadata FROM memories")
+            cur = self._conn.execute(
+                f"SELECT id, content, metadata, expires_at FROM memories WHERE {_ACTIVE}",
+                (now,),
+            )
         return [
-            MemoryItem(id=r[0], content=r[1], metadata=json.loads(r[2]))
+            MemoryItem(id=r[0], content=r[1], metadata=json.loads(r[2]), expires_at=r[3])
+            for r in cur.fetchall()
+        ]
+
+    def recent(self, n: int, user_id: Optional[str] = None) -> list[MemoryItem]:
+        """Return the n most recently added active memories, newest first."""
+        now = time.time()
+        if user_id:
+            cur = self._conn.execute(
+                f"SELECT id, content, metadata, expires_at FROM memories "
+                f"WHERE json_extract(metadata, '$.user_id') = ? AND {_ACTIVE} "
+                f"ORDER BY created_at DESC LIMIT ?",
+                (user_id, now, n),
+            )
+        else:
+            cur = self._conn.execute(
+                f"SELECT id, content, metadata, expires_at FROM memories "
+                f"WHERE {_ACTIVE} ORDER BY created_at DESC LIMIT ?",
+                (now, n),
+            )
+        return [
+            MemoryItem(id=r[0], content=r[1], metadata=json.loads(r[2]), expires_at=r[3])
             for r in cur.fetchall()
         ]
 

@@ -20,6 +20,7 @@ class MemoryItem:
     id: str
     content: str
     metadata: dict = field(default_factory=dict)
+    expires_at: Optional[float] = None
 
 
 @dataclass

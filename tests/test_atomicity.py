@@ -56,7 +56,7 @@ def test_add_reports_failed_on_store_error(store):
 
     mem = Memory(store=store, embedder=DummyEmbedder())
 
-    def boom(item, embedding):
+    def boom(item, embedding, **kwargs):
         raise sqlite3.OperationalError("simulated failure")
 
     store.add_atomic = boom
@@ -76,7 +76,7 @@ def test_failed_insert_leaves_no_row(store):
     mem = Memory(store=store, embedder=DummyEmbedder())
     fid = content_id(fact)
 
-    store.add_atomic = lambda item, emb: (_ for _ in ()).throw(
+    store.add_atomic = lambda item, emb, **kwargs: (_ for _ in ()).throw(
         sqlite3.OperationalError("boom")
     )
 
@@ -96,7 +96,7 @@ def test_second_fact_stored_after_first_fails(store):
     first_call = True
     _original = store.add_atomic
 
-    def selective_fail(item, embedding):
+    def selective_fail(item, embedding, **kwargs):
         nonlocal first_call
         if first_call:
             first_call = False

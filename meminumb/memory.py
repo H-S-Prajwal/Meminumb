@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import Optional
 
 from meminumb._id import content_id
@@ -48,19 +49,22 @@ class Memory:
         user_id: str = "",
         agent_id: str = "",
         metadata: Optional[dict] = None,
+        ttl_seconds: Optional[int] = None,
     ) -> AddResult:
         """
         Store a list of facts. Returns an AddResult describing the outcome
         of every individual fact — stored, skipped, or failed.
 
         Args:
-            facts:    Plain-text facts to remember.
-            user_id:  Scope the memory to a specific user.
-            agent_id: Scope the memory to a specific agent (optional).
-            metadata: Extra key/value pairs stored alongside each fact.
+            facts:       Plain-text facts to remember.
+            user_id:     Scope the memory to a specific user.
+            agent_id:    Scope the memory to a specific agent (optional).
+            metadata:    Extra key/value pairs stored alongside each fact.
+            ttl_seconds: Seconds until this memory expires. Omit for permanent storage.
         """
         result = AddResult()
         base_meta = {"user_id": user_id, "agent_id": agent_id, **(metadata or {})}
+        expires_at = time.time() + ttl_seconds if ttl_seconds is not None else None
 
         for fact in facts:
             fact = fact.strip()
@@ -95,8 +99,8 @@ class Memory:
 
             # 3. Atomic write — SQLite rolls back automatically on any error
             try:
-                item = MemoryItem(id=fid, content=fact, metadata=base_meta)
-                self._store.add_atomic(item, embedding)
+                item = MemoryItem(id=fid, content=fact, metadata=base_meta, expires_at=expires_at)
+                self._store.add_atomic(item, embedding, expires_at=expires_at)
                 result.stored.append(item)
             except Exception as exc:
                 result.failed.append(
@@ -172,3 +176,17 @@ class Memory:
     def get_all(self, user_id: str = "") -> list[MemoryItem]:
         """Return all stored memories, optionally filtered by user_id."""
         return self._store.all(user_id=user_id or None)
+
+    def get_recent(self, n: int, user_id: str = "") -> list[MemoryItem]:
+        """
+        Return the n most recently added memories, newest first.
+
+        Args:
+            n:       Maximum number of memories to return.
+            user_id: Scope to a specific user. Returns across all users if omitted.
+        """
+        return self._store.recent(n, user_id=user_id or None)
+
+    def clear_expired(self) -> int:
+        """Delete all memories whose TTL has passed. Returns the count removed."""
+        return self._store.clear_expired()

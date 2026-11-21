@@ -13,4 +13,4 @@ from meminumb.memory import Memory
 from meminumb.result import AddResult, MemoryItem, SkippedItem, SkipReason
 
 __all__ = ["Memory", "AddResult", "MemoryItem", "SkipReason", "SkippedItem"]
-__version__ = "0.1.0"
+__version__ = "0.2.0"

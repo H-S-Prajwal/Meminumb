@@ -129,6 +129,37 @@ The database file is created automatically. Use the same path across sessions to
 
 ---
 
+## Architecture and design decisions
+
+### Why SQLite instead of a vector database?
+
+Most AI memory libraries use a dedicated vector database (Qdrant, Pinecone, Chroma) alongside a separate metadata store. This creates two systems that can go out of sync — if the vector write succeeds but the metadata write fails, you have an orphaned vector with no history record. This is exactly the bug that inspired Meminumb (see [mem0ai/mem0#7879](https://github.com/mem0ai/mem0/issues/7879)).
+
+Meminumb stores everything — content, embedding, metadata — in a single SQLite table. SQLite's WAL-mode transactions mean a write either fully commits or fully rolls back. One system, one failure mode, no orphans.
+
+### Why content-addressed IDs instead of random UUIDs?
+
+A random UUID means every `add()` call needs a full-text scan to detect duplicates. It also means retrying a failed add creates a new ID each time, potentially producing duplicates.
+
+Meminumb derives the ID from the content:
+```python
+id = sha256(user_id + agent_id + content.strip().lower())[:16]
+```
+
+Same fact + same user always produces the same ID. Duplicate detection is a single existence check. Retries are naturally idempotent — re-adding a fact that already exists is a no-op, not a duplicate.
+
+### Why `AddResult` instead of raising exceptions?
+
+Raising an exception on the first failure stops processing the entire batch. In an agent loop adding 10 facts, one embed failure would silently discard the other 9.
+
+`AddResult` processes every fact independently and classifies each into `stored`, `skipped`, or `failed` with a machine-readable `SkipReason`. The caller decides what to do — retry the failed ones, alert on duplicates, or just log. Nothing is ever silently dropped.
+
+### Why `update()` re-embeds on content change?
+
+Embeddings are what power semantic search. If you change the content text but keep the old embedding, search would still find this memory based on the *old* meaning. Re-embedding on every content change keeps search results accurate with no extra work from the caller.
+
+---
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).

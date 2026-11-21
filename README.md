@@ -126,7 +126,7 @@ The most direct way to see Meminumb in action is the conversational demo. It use
 ```bash
 pip install groq
 export GROQ_API_KEY="your-key-here"   # free at console.groq.com
-python examples/chat_demo.py
+python examples/groq_chatbot.py
 ```
 
 **First session:**

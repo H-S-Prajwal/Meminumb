@@ -1,0 +1,166 @@
+"""
+Meminumb CLI — inspect and manage memories from the terminal.
+
+Usage:
+    meminumb list   --db PATH [--user USER]
+    meminumb search QUERY --db PATH [--user USER] [--top-k N]
+    meminumb stats  --db PATH
+    meminumb clear-expired --db PATH
+    meminumb clear  --db PATH [--user USER]
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from datetime import datetime
+
+
+def _mem(db: str):
+    from meminumb import Memory
+    return Memory(db_path=db)
+
+
+def _fmt_time(ts: float | None) -> str:
+    if ts is None:
+        return "never"
+    return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def cmd_list(args: argparse.Namespace) -> None:
+    mem = _mem(args.db)
+    items = mem.get_all(user_id=args.user or "")
+    if not items:
+        scope = f"user '{args.user}'" if args.user else "all users"
+        print(f"No memories found for {scope}.")
+        return
+
+    scope = f"user '{args.user}'" if args.user else "all users"
+    print(f"{len(items)} memory/memories for {scope} in {args.db}\n")
+    for item in items:
+        expiry = f"  expires {_fmt_time(item.expires_at)}" if item.expires_at else ""
+        print(f"  [{item.id}] {item.content}{expiry}")
+
+
+def cmd_search(args: argparse.Namespace) -> None:
+    mem = _mem(args.db)
+    hits = mem.search(args.query, user_id=args.user or "", top_k=args.top_k)
+    if not hits:
+        print(f"No results for '{args.query}'.")
+        return
+
+    print(f"Top {len(hits)} result(s) for '{args.query}':\n")
+    for i, item in enumerate(hits, 1):
+        print(f"  {i}. [{item.id}] {item.content}")
+
+
+def cmd_stats(args: argparse.Namespace) -> None:
+    import time
+
+    from meminumb import Memory
+    from meminumb.store import SQLiteStore
+
+    store = SQLiteStore(args.db)
+    mem = Memory(store=store)
+
+    all_items = mem.get_all()
+    now = time.time()
+
+    # Count expired rows directly via the connection
+    cur = store._conn.execute(
+        "SELECT COUNT(*) FROM memories WHERE expires_at IS NOT NULL AND expires_at <= ?",
+        (now,),
+    )
+    expired_count = cur.fetchone()[0]
+
+    cur2 = store._conn.execute("SELECT COUNT(*) FROM memories")
+    total_rows = cur2.fetchone()[0]
+
+    cur3 = store._conn.execute(
+        "SELECT MIN(created_at), MAX(created_at) FROM memories"
+    )
+    oldest_ts, newest_ts = cur3.fetchone()
+
+    cur4 = store._conn.execute(
+        "SELECT DISTINCT json_extract(metadata, '$.user_id') FROM memories"
+    )
+    users = [r[0] for r in cur4.fetchall() if r[0]]
+
+    print(f"Database : {args.db}")
+    print(f"Total    : {total_rows} row(s)  ({expired_count} expired, {len(all_items)} active)")
+    print(f"Users    : {len(users)}  {users if users else ''}")
+    print(f"Oldest   : {_fmt_time(oldest_ts)}")
+    print(f"Newest   : {_fmt_time(newest_ts)}")
+
+
+def cmd_clear_expired(args: argparse.Namespace) -> None:
+    mem = _mem(args.db)
+    removed = mem.clear_expired()
+    print(f"Removed {removed} expired memory/memories from {args.db}.")
+
+
+def cmd_clear(args: argparse.Namespace) -> None:
+    mem = _mem(args.db)
+    scope = f"user '{args.user}'" if args.user else "ALL users"
+
+    # Confirm before wiping everything
+    if not args.user:
+        answer = input(f"This will delete ALL memories in {args.db}. Type 'yes' to confirm: ")
+        if answer.strip().lower() != "yes":
+            print("Aborted.")
+            return
+
+    removed = mem.clear(user_id=args.user or "")
+    print(f"Cleared {removed} memory/memories for {scope}.")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        prog="meminumb",
+        description="Inspect and manage Meminumb memory databases.",
+    )
+    sub = parser.add_subparsers(dest="command", metavar="COMMAND")
+    sub.required = True
+
+    # ── list ──────────────────────────────────────────────────────────────────
+    p_list = sub.add_parser("list", help="list stored memories")
+    p_list.add_argument("--db", required=True, metavar="PATH", help="path to the SQLite database")
+    p_list.add_argument("--user", metavar="USER", help="filter by user_id")
+    p_list.set_defaults(func=cmd_list)
+
+    # ── search ────────────────────────────────────────────────────────────────
+    p_search = sub.add_parser("search", help="search memories by similarity")
+    p_search.add_argument("query", help="search query text")
+    p_search.add_argument("--db", required=True, metavar="PATH", help="path to the SQLite database")
+    p_search.add_argument("--user", metavar="USER", help="filter by user_id")
+    p_search.add_argument(
+        "--top-k", type=int, default=5, metavar="N", help="number of results (default: 5)"
+    )
+    p_search.set_defaults(func=cmd_search)
+
+    # ── stats ─────────────────────────────────────────────────────────────────
+    p_stats = sub.add_parser("stats", help="show database statistics")
+    p_stats.add_argument("--db", required=True, metavar="PATH", help="path to the SQLite database")
+    p_stats.set_defaults(func=cmd_stats)
+
+    # ── clear-expired ─────────────────────────────────────────────────────────
+    p_ce = sub.add_parser("clear-expired", help="delete all expired memories")
+    p_ce.add_argument("--db", required=True, metavar="PATH", help="path to the SQLite database")
+    p_ce.set_defaults(func=cmd_clear_expired)
+
+    # ── clear ─────────────────────────────────────────────────────────────────
+    p_clear = sub.add_parser("clear", help="delete memories for a user (or all)")
+    p_clear.add_argument("--db", required=True, metavar="PATH", help="path to the SQLite database")
+    p_clear.add_argument("--user", metavar="USER", help="user_id to clear (omit to clear all)")
+    p_clear.set_defaults(func=cmd_clear)
+
+    args = parser.parse_args()
+    try:
+        args.func(args)
+    except KeyboardInterrupt:
+        print("\nAborted.")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

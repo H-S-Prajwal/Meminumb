@@ -1,7 +1,7 @@
 """
-Conversational memory demo — a CLI chatbot that remembers you across sessions.
+Groq-powered chatbot with persistent memory across sessions.
 
-This demo shows Meminumb's core value: an AI that extracts facts from your
+Demonstrates Meminumb's core value: an AI that extracts facts from your
 conversation and recalls them the next time you talk to it.
 
 Setup:
@@ -9,7 +9,7 @@ Setup:
     export GROQ_API_KEY="your-key-here"
 
 Run:
-    python examples/chat_demo.py
+    python examples/groq_chatbot.py
 
 Quit and run again — the bot will remember what you told it.
 Type 'quit' or 'exit' to end the session.

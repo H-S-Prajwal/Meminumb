@@ -1,5 +1,8 @@
 """
-LangChain integration demo — Meminumb as a persistent chat memory backend.
+LangChain integration — Meminumb as a persistent chat memory backend.
+
+Shows how to use MeminumbChatHistory with RunnableWithMessageHistory so
+any LangChain chain or agent gets full conversation persistence via SQLite.
 
 Install:
     pip install meminumb[langchain] langchain-groq
@@ -8,7 +11,7 @@ Set env var:
     export GROQ_API_KEY="your-key-here"
 
 Run:
-    python examples/langchain_demo.py
+    python examples/langchain_integration.py
 
 Quit and run again — the full conversation history is restored from Meminumb.
 """

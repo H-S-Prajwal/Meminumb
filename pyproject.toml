@@ -22,6 +22,9 @@ classifiers = [
 ]
 dependencies = []
 
+[project.scripts]
+meminumb = "meminumb.cli:main"
+
 [project.optional-dependencies]
 local = ["sentence-transformers>=2.7"]
 openai = ["openai>=1.0"]

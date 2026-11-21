@@ -61,6 +61,38 @@ class SQLiteStore:
                 ),
             )
 
+    def update_atomic(
+        self,
+        memory_id: str,
+        content: Optional[str],
+        embedding: Optional[list[float]],
+        metadata: Optional[dict],
+    ) -> bool:
+        """
+        Update content, embedding, and/or metadata for an existing memory.
+
+        Returns False if the memory_id does not exist, True on success.
+        The update is atomic — a failure leaves the original row unchanged.
+        """
+        existing = self.get(memory_id)
+        if existing is None:
+            return False
+
+        new_content = content if content is not None else existing.content
+        new_embedding = embedding if embedding is not None else json.loads(
+            self._conn.execute(
+                "SELECT embedding FROM memories WHERE id = ?", (memory_id,)
+            ).fetchone()[0]
+        )
+        new_metadata = {**existing.metadata, **(metadata or {})}
+
+        with self._conn:
+            self._conn.execute(
+                "UPDATE memories SET content = ?, embedding = ?, metadata = ? WHERE id = ?",
+                (new_content, json.dumps(new_embedding), json.dumps(new_metadata), memory_id),
+            )
+        return True
+
     def delete(self, memory_id: str) -> bool:
         with self._conn:
             cur = self._conn.execute(

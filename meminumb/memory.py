@@ -109,6 +109,35 @@ class Memory:
 
         return result
 
+    def update(
+        self,
+        memory_id: str,
+        content: Optional[str] = None,
+        metadata: Optional[dict] = None,
+    ) -> MemoryItem:
+        """
+        Update an existing memory's content and/or metadata.
+
+        If content changes, it is re-embedded automatically.
+        Returns the updated MemoryItem.
+        Raises KeyError if memory_id does not exist.
+
+        Args:
+            memory_id: ID of the memory to update.
+            content:   New content text. If omitted, content is unchanged.
+            metadata:  Extra key/value pairs to merge into existing metadata.
+        """
+        if not self._store.exists(memory_id):
+            raise KeyError(f"Memory '{memory_id}' not found.")
+
+        new_embedding = None
+        if content is not None:
+            content = content.strip()
+            new_embedding = self._embedder.embed(content)
+
+        self._store.update_atomic(memory_id, content, new_embedding, metadata)
+        return self._store.get(memory_id)
+
     def delete(self, memory_id: str) -> bool:
         """Remove a memory by its ID. Returns True if it existed."""
         return self._store.delete(memory_id)

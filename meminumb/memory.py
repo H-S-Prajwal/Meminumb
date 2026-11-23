@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import time
+from datetime import datetime, timezone
 from typing import Optional
 
 from meminumb._id import content_id
@@ -201,3 +203,89 @@ class Memory:
     def clear_expired(self) -> int:
         """Delete all memories whose TTL has passed. Returns the count removed."""
         return self._store.clear_expired()
+
+    # ------------------------------------------------------------------
+    # Import / Export
+    # ------------------------------------------------------------------
+
+    def export(self, path: str, user_id: str = "", agent_id: str = "") -> int:
+        """
+        Write all active memories to a JSON file.
+
+        Embeddings are included so the file can be imported into another
+        database without calling any external service.
+
+        Args:
+            path:     Destination file path (created or overwritten).
+            user_id:  Scope export to a specific user. Exports all users if omitted.
+            agent_id: Scope export to a specific agent. Exports all agents if omitted.
+
+        Returns:
+            Number of memories written.
+        """
+        from meminumb import __version__
+
+        rows = self._store.export_rows(user_id=user_id or None, agent_id=agent_id or None)
+        payload = {
+            "meminumb_version": __version__,
+            "exported_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "count": len(rows),
+            "memories": rows,
+        }
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, indent=2)
+        return len(rows)
+
+    def import_from(self, path: str) -> dict:
+        """
+        Import memories from a JSON file previously created by :meth:`export`.
+
+        Already-active duplicates (same ID) are skipped. Memories whose TTL
+        already expired at import time are also skipped. Embeddings stored in
+        the file are reused directly; if a row has no embedding it is re-computed
+        with the current embedder.
+
+        Returns:
+            A dict with keys ``stored``, ``skipped``, ``failed`` (all int).
+        """
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+
+        now = time.time()
+        stored = skipped = failed = 0
+
+        for m in data.get("memories", []):
+            expires_at = m.get("expires_at")
+
+            # Skip memories that were already expired at export time or have
+            # since expired.
+            if expires_at is not None and expires_at <= now:
+                skipped += 1
+                continue
+
+            # Skip exact duplicates already in this database.
+            if self._store.exists(m["id"]):
+                skipped += 1
+                continue
+
+            embedding = m.get("embedding") or []
+            if not embedding:
+                try:
+                    embedding = self._embedder.embed(m["content"])
+                except Exception:
+                    failed += 1
+                    continue
+
+            item = MemoryItem(
+                id=m["id"],
+                content=m["content"],
+                metadata=m.get("metadata", {}),
+                expires_at=expires_at,
+            )
+            try:
+                self._store.add_atomic(item, embedding, expires_at=expires_at)
+                stored += 1
+            except Exception:
+                failed += 1
+
+        return {"stored": stored, "skipped": skipped, "failed": failed}

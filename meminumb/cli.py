@@ -143,6 +143,30 @@ def cmd_clear_expired(args: argparse.Namespace) -> None:
     print(f"Removed {removed} expired memory/memories from {args.db}.")
 
 
+def cmd_export(args: argparse.Namespace) -> None:
+    mem = _mem(args.db)
+    count = mem.export(args.output, user_id=args.user or "", agent_id=args.agent or "")
+    scope = f"user '{args.user}'" if args.user else "all users"
+    print(f"Exported {count} memory/memories for {scope} → {args.output}")
+
+
+def cmd_import(args: argparse.Namespace) -> None:
+    mem = _mem(args.db)
+    if args.dry_run:
+        import json
+
+        with open(args.input, encoding="utf-8") as fh:
+            data = json.load(fh)
+        total = len(data.get("memories", []))
+        print(f"[dry-run] Would import up to {total} memory/memories from {args.input}")
+        return
+    result = mem.import_from(args.input)
+    print(
+        f"Imported from {args.input}: "
+        f"{result['stored']} stored, {result['skipped']} skipped, {result['failed']} failed."
+    )
+
+
 def cmd_clear(args: argparse.Namespace) -> None:
     mem = _mem(args.db)
     scope = f"user '{args.user}'" if args.user else "ALL users"
@@ -222,6 +246,27 @@ def main() -> None:
     p_clear.add_argument("--db", required=True, metavar="PATH", help="path to the SQLite database")
     p_clear.add_argument("--user", metavar="USER", help="user_id to clear (omit to clear all)")
     p_clear.set_defaults(func=cmd_clear)
+
+    # ── export ────────────────────────────────────────────────────────────────
+    p_export = sub.add_parser("export", help="export memories to a JSON file")
+    p_export.add_argument("--db", required=True, metavar="PATH", help="path to the SQLite database")
+    p_export.add_argument(
+        "--output", required=True, metavar="FILE", help="destination JSON file"
+    )
+    p_export.add_argument("--user", metavar="USER", help="export only this user's memories")
+    p_export.add_argument("--agent", metavar="AGENT", help="export only this agent's memories")
+    p_export.set_defaults(func=cmd_export)
+
+    # ── import ────────────────────────────────────────────────────────────────
+    p_import = sub.add_parser("import", help="import memories from a JSON file")
+    p_import.add_argument("--db", required=True, metavar="PATH", help="path to the SQLite database")
+    p_import.add_argument(
+        "--input", required=True, metavar="FILE", help="source JSON file (from 'export')"
+    )
+    p_import.add_argument(
+        "--dry-run", action="store_true", help="show what would be imported without writing"
+    )
+    p_import.set_defaults(func=cmd_import)
 
     args = parser.parse_args()
     try:

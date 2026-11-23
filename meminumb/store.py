@@ -199,7 +199,9 @@ class SQLiteStore:
             for r in scored[:top_k]
         ]
 
-    def all(self, user_id: Optional[str] = None, agent_id: Optional[str] = None) -> list[MemoryItem]:
+    def all(
+        self, user_id: Optional[str] = None, agent_id: Optional[str] = None
+    ) -> list[MemoryItem]:
         now = time.time()
         where, params = _scope_filter(user_id, agent_id, now)
         cur = self._conn.execute(
@@ -211,7 +213,9 @@ class SQLiteStore:
             for r in cur.fetchall()
         ]
 
-    def recent(self, n: int, user_id: Optional[str] = None, agent_id: Optional[str] = None) -> list[MemoryItem]:
+    def recent(
+        self, n: int, user_id: Optional[str] = None, agent_id: Optional[str] = None
+    ) -> list[MemoryItem]:
         """Return the n most recently added active memories, newest first."""
         now = time.time()
         where, params = _scope_filter(user_id, agent_id, now)

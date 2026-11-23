@@ -185,7 +185,7 @@ def test_recent_respects_n(tmp_path, capsys):
     db = _db(tmp_path)
     _seed(db)
     out, _ = _run(["recent", "1", "--db", db, "--user", "alice"], capsys)
-    lines = [l for l in out.splitlines() if l.strip().startswith("[")]
+    lines = [line for line in out.splitlines() if line.strip().startswith("[")]
     assert len(lines) == 1
 
 

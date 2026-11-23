@@ -183,7 +183,9 @@ def main() -> None:
 
     # ── recent ────────────────────────────────────────────────────────────────
     p_recent = sub.add_parser("recent", help="list the most recently added memories")
-    p_recent.add_argument("n", type=int, nargs="?", default=10, metavar="N", help="how many to show (default: 10)")
+    p_recent.add_argument(
+        "n", type=int, nargs="?", default=10, metavar="N", help="how many to show (default: 10)"
+    )
     p_recent.add_argument("--db", required=True, metavar="PATH", help="path to the SQLite database")
     p_recent.add_argument("--user", metavar="USER", help="filter by user_id")
     p_recent.add_argument("--agent", metavar="AGENT", help="filter by agent_id")

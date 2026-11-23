@@ -162,30 +162,41 @@ class Memory:
         self,
         query: str,
         user_id: str = "",
+        agent_id: str = "",
         top_k: int = 5,
     ) -> list[MemoryItem]:
         """
         Return the top_k most relevant memories for the given query.
 
         Uses cosine similarity between the query embedding and stored
-        embeddings. Scoped to user_id when provided.
+        embeddings. Scoped to user_id and/or agent_id when provided.
         """
         query_embedding = self._embedder.embed(query)
-        return self._store.search(query_embedding, top_k=top_k, user_id=user_id or None)
+        return self._store.search(
+            query_embedding,
+            top_k=top_k,
+            user_id=user_id or None,
+            agent_id=agent_id or None,
+        )
 
-    def get_all(self, user_id: str = "") -> list[MemoryItem]:
-        """Return all stored memories, optionally filtered by user_id."""
-        return self._store.all(user_id=user_id or None)
+    def get_all(self, user_id: str = "", agent_id: str = "") -> list[MemoryItem]:
+        """Return all stored memories, optionally filtered by user_id and/or agent_id."""
+        return self._store.all(user_id=user_id or None, agent_id=agent_id or None)
 
-    def get_recent(self, n: int, user_id: str = "") -> list[MemoryItem]:
+    def get_recent(self, n: int, user_id: str = "", agent_id: str = "") -> list[MemoryItem]:
         """
         Return the n most recently added memories, newest first.
 
         Args:
-            n:       Maximum number of memories to return.
-            user_id: Scope to a specific user. Returns across all users if omitted.
+            n:        Maximum number of memories to return.
+            user_id:  Scope to a specific user. Returns across all users if omitted.
+            agent_id: Scope to a specific agent. Returns across all agents if omitted.
         """
-        return self._store.recent(n, user_id=user_id or None)
+        return self._store.recent(n, user_id=user_id or None, agent_id=agent_id or None)
+
+    def count(self, user_id: str = "", agent_id: str = "") -> int:
+        """Return the number of active memories, optionally scoped by user_id and/or agent_id."""
+        return self._store.count(user_id=user_id or None, agent_id=agent_id or None)
 
     def clear_expired(self) -> int:
         """Delete all memories whose TTL has passed. Returns the count removed."""

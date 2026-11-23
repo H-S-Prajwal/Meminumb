@@ -174,21 +174,15 @@ class SQLiteStore:
         query_embedding: list[float],
         top_k: int = 5,
         user_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
     ) -> list[MemoryItem]:
         """Return top_k memories ranked by cosine similarity to query_embedding."""
         now = time.time()
-        if user_id:
-            cur = self._conn.execute(
-                f"SELECT id, content, metadata, embedding, expires_at FROM memories "
-                f"WHERE json_extract(metadata, '$.user_id') = ? AND {_ACTIVE}",
-                (user_id, now),
-            )
-        else:
-            cur = self._conn.execute(
-                f"SELECT id, content, metadata, embedding, expires_at FROM memories "
-                f"WHERE {_ACTIVE}",
-                (now,),
-            )
+        where, params = _scope_filter(user_id, agent_id, now)
+        cur = self._conn.execute(
+            f"SELECT id, content, metadata, embedding, expires_at FROM memories WHERE {where}",
+            params,
+        )
         rows = cur.fetchall()
         if not rows:
             return []
@@ -205,49 +199,67 @@ class SQLiteStore:
             for r in scored[:top_k]
         ]
 
-    def all(self, user_id: Optional[str] = None) -> list[MemoryItem]:
+    def all(
+        self, user_id: Optional[str] = None, agent_id: Optional[str] = None
+    ) -> list[MemoryItem]:
         now = time.time()
-        if user_id:
-            cur = self._conn.execute(
-                f"SELECT id, content, metadata, expires_at FROM memories "
-                f"WHERE json_extract(metadata, '$.user_id') = ? AND {_ACTIVE}",
-                (user_id, now),
-            )
-        else:
-            cur = self._conn.execute(
-                f"SELECT id, content, metadata, expires_at FROM memories WHERE {_ACTIVE}",
-                (now,),
-            )
+        where, params = _scope_filter(user_id, agent_id, now)
+        cur = self._conn.execute(
+            f"SELECT id, content, metadata, expires_at FROM memories WHERE {where}",
+            params,
+        )
         return [
             MemoryItem(id=r[0], content=r[1], metadata=json.loads(r[2]), expires_at=r[3])
             for r in cur.fetchall()
         ]
 
-    def recent(self, n: int, user_id: Optional[str] = None) -> list[MemoryItem]:
+    def recent(
+        self, n: int, user_id: Optional[str] = None, agent_id: Optional[str] = None
+    ) -> list[MemoryItem]:
         """Return the n most recently added active memories, newest first."""
         now = time.time()
-        if user_id:
-            cur = self._conn.execute(
-                f"SELECT id, content, metadata, expires_at FROM memories "
-                f"WHERE json_extract(metadata, '$.user_id') = ? AND {_ACTIVE} "
-                f"ORDER BY created_at DESC LIMIT ?",
-                (user_id, now, n),
-            )
-        else:
-            cur = self._conn.execute(
-                f"SELECT id, content, metadata, expires_at FROM memories "
-                f"WHERE {_ACTIVE} ORDER BY created_at DESC LIMIT ?",
-                (now, n),
-            )
+        where, params = _scope_filter(user_id, agent_id, now)
+        cur = self._conn.execute(
+            f"SELECT id, content, metadata, expires_at FROM memories "
+            f"WHERE {where} ORDER BY created_at DESC LIMIT ?",
+            (*params, n),
+        )
         return [
             MemoryItem(id=r[0], content=r[1], metadata=json.loads(r[2]), expires_at=r[3])
             for r in cur.fetchall()
         ]
+
+    def count(self, user_id: Optional[str] = None, agent_id: Optional[str] = None) -> int:
+        """Return the number of active memories, optionally scoped by user_id and/or agent_id."""
+        now = time.time()
+        where, params = _scope_filter(user_id, agent_id, now)
+        cur = self._conn.execute(
+            f"SELECT COUNT(*) FROM memories WHERE {where}",
+            params,
+        )
+        return cur.fetchone()[0]
 
 
 # ------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------
+
+
+def _scope_filter(
+    user_id: Optional[str],
+    agent_id: Optional[str],
+    now: float,
+) -> tuple[str, tuple]:
+    """Build a WHERE clause + params tuple for active-row + optional scope filters."""
+    clauses = [_ACTIVE]
+    params: list = [now]
+    if user_id:
+        clauses.append("json_extract(metadata, '$.user_id') = ?")
+        params.append(user_id)
+    if agent_id:
+        clauses.append("json_extract(metadata, '$.agent_id') = ?")
+        params.append(agent_id)
+    return " AND ".join(clauses), tuple(params)
 
 
 def _cosine(a: list[float], b: list[float]) -> float:

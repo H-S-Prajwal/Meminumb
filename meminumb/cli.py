@@ -2,11 +2,14 @@
 Meminumb CLI — inspect and manage memories from the terminal.
 
 Usage:
-    meminumb list   --db PATH [--user USER]
+    meminumb add    FACT  --db PATH [--user USER] [--agent AGENT] [--ttl SECONDS]
+    meminumb delete ID    --db PATH
+    meminumb recent [N]   --db PATH [--user USER] [--agent AGENT]
+    meminumb list         --db PATH [--user USER]
     meminumb search QUERY --db PATH [--user USER] [--top-k N]
-    meminumb stats  --db PATH
+    meminumb stats        --db PATH
     meminumb clear-expired --db PATH
-    meminumb clear  --db PATH [--user USER]
+    meminumb clear        --db PATH [--user USER]
 """
 
 from __future__ import annotations
@@ -25,6 +28,47 @@ def _fmt_time(ts: float | None) -> str:
     if ts is None:
         return "never"
     return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def cmd_add(args: argparse.Namespace) -> None:
+    mem = _mem(args.db)
+    result = mem.add(
+        [args.fact],
+        user_id=args.user or "",
+        agent_id=args.agent or "",
+        ttl_seconds=args.ttl,
+    )
+    if result.stored:
+        item = result.stored[0]
+        print(f"Stored [{item.id}]: {item.content}")
+    elif result.skipped:
+        skip = result.skipped[0]
+        print(f"Skipped ({skip.reason.value}): already stored as [{skip.existing_id}]")
+    else:
+        print(f"Failed: {result.failed[0].error}")
+
+
+def cmd_delete(args: argparse.Namespace) -> None:
+    mem = _mem(args.db)
+    if mem.delete(args.memory_id):
+        print(f"Deleted [{args.memory_id}].")
+    else:
+        print(f"Not found: [{args.memory_id}].")
+
+
+def cmd_recent(args: argparse.Namespace) -> None:
+    mem = _mem(args.db)
+    items = mem.get_recent(args.n, user_id=args.user or "", agent_id=args.agent or "")
+    if not items:
+        scope = f"user '{args.user}'" if args.user else "all users"
+        print(f"No memories found for {scope}.")
+        return
+
+    scope = f"user '{args.user}'" if args.user else "all users"
+    print(f"{len(items)} most recent memory/memories for {scope}:\n")
+    for item in items:
+        expiry = f"  expires {_fmt_time(item.expires_at)}" if item.expires_at else ""
+        print(f"  [{item.id}] {item.content}{expiry}")
 
 
 def cmd_list(args: argparse.Namespace) -> None:
@@ -121,6 +165,31 @@ def main() -> None:
     )
     sub = parser.add_subparsers(dest="command", metavar="COMMAND")
     sub.required = True
+
+    # ── add ───────────────────────────────────────────────────────────────────
+    p_add = sub.add_parser("add", help="store a new memory fact")
+    p_add.add_argument("fact", help="the fact text to store")
+    p_add.add_argument("--db", required=True, metavar="PATH", help="path to the SQLite database")
+    p_add.add_argument("--user", metavar="USER", help="user_id to scope the memory")
+    p_add.add_argument("--agent", metavar="AGENT", help="agent_id to scope the memory")
+    p_add.add_argument("--ttl", type=int, metavar="SECONDS", help="seconds until expiry")
+    p_add.set_defaults(func=cmd_add)
+
+    # ── delete ────────────────────────────────────────────────────────────────
+    p_del = sub.add_parser("delete", help="delete a memory by its ID")
+    p_del.add_argument("memory_id", help="the memory ID to delete")
+    p_del.add_argument("--db", required=True, metavar="PATH", help="path to the SQLite database")
+    p_del.set_defaults(func=cmd_delete)
+
+    # ── recent ────────────────────────────────────────────────────────────────
+    p_recent = sub.add_parser("recent", help="list the most recently added memories")
+    p_recent.add_argument(
+        "n", type=int, nargs="?", default=10, metavar="N", help="how many to show (default: 10)"
+    )
+    p_recent.add_argument("--db", required=True, metavar="PATH", help="path to the SQLite database")
+    p_recent.add_argument("--user", metavar="USER", help="filter by user_id")
+    p_recent.add_argument("--agent", metavar="AGENT", help="filter by agent_id")
+    p_recent.set_defaults(func=cmd_recent)
 
     # ── list ──────────────────────────────────────────────────────────────────
     p_list = sub.add_parser("list", help="list stored memories")

@@ -5,7 +5,7 @@ from typing import Optional
 
 from meminumb._id import content_id
 from meminumb.embedder import BaseEmbedder, DummyEmbedder
-from meminumb.result import AddResult, MemoryItem, SkippedItem, SkipReason
+from meminumb.result import AddResult, MemoryItem, SearchResult, SkippedItem, SkipReason
 from meminumb.store import SQLiteStore
 
 
@@ -164,20 +164,51 @@ class Memory:
         user_id: str = "",
         agent_id: str = "",
         top_k: int = 5,
+        min_score: float = 0.0,
     ) -> list[MemoryItem]:
         """
         Return the top_k most relevant memories for the given query.
 
         Uses cosine similarity between the query embedding and stored
         embeddings. Scoped to user_id and/or agent_id when provided.
+
+        Args:
+            min_score: Exclude results whose cosine similarity is below this
+                       threshold. Useful for filtering out low-relevance noise.
+                       Range [0.0, 1.0]; default 0.0 returns all top_k results.
+        """
+        return [r.item for r in self.search_scored(
+            query, user_id=user_id, agent_id=agent_id, top_k=top_k, min_score=min_score
+        )]
+
+    def search_scored(
+        self,
+        query: str,
+        user_id: str = "",
+        agent_id: str = "",
+        top_k: int = 5,
+        min_score: float = 0.0,
+    ) -> list[SearchResult]:
+        """
+        Like search(), but returns SearchResult(item, score) pairs so callers
+        can inspect the cosine similarity of each result.
+
+        Args:
+            min_score: Exclude results whose cosine similarity is below this
+                       threshold. Range [0.0, 1.0]; default 0.0 returns all top_k.
         """
         query_embedding = self._embedder.embed(query)
-        return self._store.search(
+        raw = self._store.search(
             query_embedding,
             top_k=top_k,
             user_id=user_id or None,
             agent_id=agent_id or None,
         )
+        return [
+            SearchResult(item=item, score=score)
+            for item, score in raw
+            if score >= min_score
+        ]
 
     def get_all(self, user_id: str = "", agent_id: str = "") -> list[MemoryItem]:
         """Return all stored memories, optionally filtered by user_id and/or agent_id."""

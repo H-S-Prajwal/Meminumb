@@ -88,14 +88,20 @@ def cmd_list(args: argparse.Namespace) -> None:
 
 def cmd_search(args: argparse.Namespace) -> None:
     mem = _mem(args.db)
-    hits = mem.search(args.query, user_id=args.user or "", top_k=args.top_k)
-    if not hits:
+    results = mem.search_scored(
+        args.query,
+        user_id=args.user or "",
+        top_k=args.top_k,
+        min_score=args.min_score,
+    )
+    if not results:
         print(f"No results for '{args.query}'.")
         return
 
-    print(f"Top {len(hits)} result(s) for '{args.query}':\n")
-    for i, item in enumerate(hits, 1):
-        print(f"  {i}. [{item.id}] {item.content}")
+    print(f"Top {len(results)} result(s) for '{args.query}':\n")
+    for i, r in enumerate(results, 1):
+        score_tag = f"  score={r.score:.3f}" if args.scores else ""
+        print(f"  {i}. [{r.item.id}] {r.item.content}{score_tag}")
 
 
 def cmd_stats(args: argparse.Namespace) -> None:
@@ -204,6 +210,16 @@ def main() -> None:
     p_search.add_argument("--user", metavar="USER", help="filter by user_id")
     p_search.add_argument(
         "--top-k", type=int, default=5, metavar="N", help="number of results (default: 5)"
+    )
+    p_search.add_argument(
+        "--min-score",
+        type=float,
+        default=0.0,
+        metavar="SCORE",
+        help="only show results with similarity >= SCORE (0.0–1.0)",
+    )
+    p_search.add_argument(
+        "--scores", action="store_true", help="print similarity score alongside each result"
     )
     p_search.set_defaults(func=cmd_search)
 

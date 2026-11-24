@@ -175,8 +175,8 @@ class SQLiteStore:
         top_k: int = 5,
         user_id: Optional[str] = None,
         agent_id: Optional[str] = None,
-    ) -> list[MemoryItem]:
-        """Return top_k memories ranked by cosine similarity to query_embedding."""
+    ) -> list[tuple[MemoryItem, float]]:
+        """Return top_k memories ranked by cosine similarity, each paired with its score."""
         now = time.time()
         where, params = _scope_filter(user_id, agent_id, now)
         cur = self._conn.execute(
@@ -195,7 +195,10 @@ class SQLiteStore:
 
         scored.sort(key=lambda x: x[0], reverse=True)
         return [
-            MemoryItem(id=r[1], content=r[2], metadata=json.loads(r[3]), expires_at=r[4])
+            (
+                MemoryItem(id=r[1], content=r[2], metadata=json.loads(r[3]), expires_at=r[4]),
+                r[0],
+            )
             for r in scored[:top_k]
         ]
 

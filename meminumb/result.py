@@ -24,6 +24,14 @@ class MemoryItem:
 
 
 @dataclass
+class SearchResult:
+    """A memory returned by search, paired with its cosine similarity score."""
+
+    item: MemoryItem
+    score: float
+
+
+@dataclass
 class SkippedItem:
     """A fact that was not stored, with a machine-readable reason."""
 
